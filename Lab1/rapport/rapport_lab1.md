@@ -4,13 +4,7 @@
 
 Dans ce rapport, nous documentons les vulnérabilités découvertes et exploitées sur différents services web dans le cadre du laboratoire SLH 2024-2025. Chaque section présente une analyse détaillée des failles CSRF, XSS et SQLi, ainsi que les méthodes employées pour contourner les protections et obtenir les flags.
 
-Voici la version corrigée du rapport pour les points 2.1, 2.2, et 2.3 :
-
----
-
-Tu soulèves un point important, et je vais clarifier la situation pour que tu comprennes bien pourquoi il peut y avoir des similarités entre la payload JavaScript utilisée pour le CSRF et celle utilisée pour l’attaque XSS, tout en étant liées à des failles différentes.
-
-### Explication des différences entre CSRF et XSS :
+### Explication des différences entre CSRF et XSS
 
 1. **CSRF (Cross-Site Request Forgery)** :
    - Le CSRF permet à un attaquant de forcer un utilisateur (ici, l’administrateur) à exécuter une requête qu'il n'a pas souhaitée. Cette attaque se produit généralement via un lien ou un formulaire soumis automatiquement (par exemple via JavaScript) sur une page où l'utilisateur est déjà authentifié. Dans ton cas, tu utilises un formulaire pour changer le mot de passe de l'administrateur en l'exécutant sans qu'il en soit conscient, profitant de l’absence de protection CSRF sur le site.
@@ -28,15 +22,11 @@ Dans ton cas, les payloads JavaScript se ressemblent parce que leur objectif fin
   
 - **Dans le cas du Stored XSS**, la payload JavaScript est injectée dans un message ou un autre contenu qui sera stocké par le site. Lorsque l'administrateur ouvre le message ou affiche la page où la payload a été injectée, le script est exécuté. Ici, la faille repose sur l'injection de code non filtré dans la page.
 
-### Résumé des différences :
+### Résumé des différences
 
 - **CSRF** : L'attaque est exécutée à distance et ne nécessite pas que l’administrateur interagisse avec la page vulnérable, mais seulement qu'il soit connecté.
   
 - **XSS** : L'attaque repose sur l'injection de code JavaScript dans une page que l’administrateur va consulter. Le code est exécuté quand il ouvre cette page, ce qui rend la vulnérabilité exploitable.
-
-### Mise à jour du rapport :
-
-Je vais reformuler les sections pour expliquer pourquoi ces payloads se ressemblent, tout en clarifiant la différence entre les deux failles.
 
 ---
 
@@ -177,20 +167,53 @@ Ces mesures renforcent la sécurité contre CSRF et XSS en bloquant les vecteurs
 
 ## 4. Injection SQL
 
-### 4.1. Partie vulnérable du service
+### 1. Quelle partie de l'application est-elle vulnérable à une injection SQL ?
 
-- **Description** : [Indiquez ici quelle partie du service est vulnérable à l’injection SQL]
+**Réponse** : La vulnérabilité à l'injection SQL se trouve dans le champ "id" du JSON envoyé à l'URL `http://sql.slh.cyfr.ch/flowers`. En utilisant une requête POST, nous pouvons injecter des requêtes SQL via ce champ pour manipuler les résultats de la base de données.
 
-### 4.2. Insuffisance de la validation des entrées
+### 2. Le serveur implémente-t-il une forme de validation des entrées ? Pourquoi est-ce insuffisant dans ce cas ?
 
-- **Explication** : [Expliquez pourquoi la validation des entrées est insuffisante]
+**Réponse** : Le serveur utilise une validation de base, mais elle est insuffisante car il ne filtre pas les caractères spéciaux comme `/` et `*`. Ces caractères peuvent être utilisés pour contourner les restrictions de validation et injecter des requêtes SQL valides, rendant l'application vulnérable à des attaques.
 
-### 4.3. Exploitation et Flag
+### 3. Quel est le flag ? Comment l'avez-vous obtenu ?
 
-- **Méthode d'exploitation** : [Décrivez comment vous avez exploité la vulnérabilité SQL]
-- **Flag** : [Indiquez ici le flag obtenu]
+**Réponse** : Le flag est : `SLH25{D0N7_P4r53_5Q1_M4NU411Y}`. Nous avons obtenu le flag en exécutant les commandes suivantes dans le terminal :
 
-### 4.4. DBMS et approche alternative
+1. **Récupération des tables dans la base de données** :
 
-- **DBMS** : [Identification du DBMS utilisé]
-- **Approche alternative** : [Expliquez comment vous auriez procédé si le DBMS avait été MySQL ou MariaDB]
+   - Nous avons d'abord envoyé une requête POST avec la commande suivante :
+
+   ```bash
+   curl -X POST http://sql.slh.cyfr.ch/flowers \
+   -H "Content-Type: application/json" \
+   -d '{"id":"1/**/UNION/**/SELECT/**/type,/**/name,/**/tbl_name,/**/rootpage/**/FROM/**/sqlite_master"}'
+   ```
+
+   - Cette requête utilise l'injection SQL pour interroger la table `sqlite_master`, qui contient les métadonnées des tables de la base de données. Grâce à l'opérateur `UNION`, nous avons pu combiner les résultats de la requête originale avec ceux de la table `sqlite_master`. La réponse obtenue a révélé les tables présentes dans la base de données, dont `super_secret_stuff` et `flowers`.
+
+2. **Récupération du flag** :
+
+   - Après avoir identifié la table contenant le flag, nous avons exécuté la commande suivante :
+
+   ```bash
+   curl -X POST http://sql.slh.cyfr.ch/flowers \
+   -H "Content-Type: application/json" \
+   -d '{"id":"1/**/UNION/**/SELECT/**/name,/**/value,/**/value,/**/value/**/FROM/**/super_secret_stuff"}'
+   ```
+
+   - Ici, nous avons à nouveau utilisé l'injection SQL pour interroger la table `super_secret_stuff`. Cette commande permet de récupérer les colonnes `name` et `value`, où le flag est stocké. La réponse reçue contenait le flag sous la forme :
+
+   ```json
+   [
+       [1, "Rose", "Red", 5],
+       ["flag", "SLH25{D0N7_P4r53_5Q1_M4NU411Y}", "SLH25{D0N7_P4r53_5Q1_M4NU411Y}", "SLH25{D0N7_P4r53_5Q1_M4NU411Y}"]
+   ]
+   ```
+
+Ainsi, en utilisant ces deux requêtes injectées, nous avons pu obtenir le flag directement à partir de la base de données.
+
+### 4. Quel est le DBMS utilisé ? Qu'est-ce qui aurait changé dans l'attaque s'il s'agissait d'un DBMS différent ?
+
+**Réponse** : Le DBMS utilisé est SQLite. Si nous avions utilisé un autre DBMS, comme MySQL ou PostgreSQL, les tables et les commandes pour interroger les métadonnées auraient été différentes. Par exemple, dans MySQL, nous aurions utilisé des requêtes comme `SHOW TABLES` ou `INFORMATION_SCHEMA.TABLES` pour explorer la structure de la base de données, ce qui nécessite une adaptation de l'approche d'attaque.
+
+---
